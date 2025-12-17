@@ -1,0 +1,286 @@
+---
+title: "Genetic and Transcriptomic Context of Lithium Response in Bipolar Disorder"
+author: "Milind Gadgil"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+`
+---
+
+```markdown
+## Overview
+
+This project examines the genetic and transcriptomic context of lithium treatment response in bipolar disorder using publicly available human genomics reference data and published genome-wide association study (GWAS) results. The goal is to contextualize lithium response loci within broader bipolar disorder genetic architecture, biological pathways, and brain-specific gene expression patterns, rather than to build a predictive clinical model.
+
+The analysis integrates curated GWAS findings from the Consortium on Lithium Genetics (ConLiGen), large-scale bipolar disorder GWAS results from the Psychiatric Genomics Consortium (PGC), pathway annotations from MSigDB, and tissue-level gene expression data from GTEx. Emphasis is placed on reproducibility, appropriate interpretation of association signals, and biological relevance to central nervous system pharmacology.
+
+## Data Sources
+
+Human reference genome and gene annotation files were obtained from Ensembl and used to define genomic coordinates and gene models throughout the analysis. All analyses were performed using the GRCh38 human reference genome (Homo_sapiens.GRCh38.dna.primary_assembly.fa.gz) together with Ensembl release 115 gene annotations (Homo_sapiens.GRCh38.115.gtf.gz). These resources provide the coordinate system and gene definitions required for variant-to-gene mapping and gene-level interpretation.
+
+Pathway and gene-set annotations were obtained from the Molecular Signatures Database (MSigDB). Specifically, the Hallmark gene set collection (H), downloaded in GMT format using human gene symbols (h.all.v20XX.X.Hs.symbols.gmt), was used for pathway-level interpretation. The Hallmark collection provides a compact, non-redundant representation of core biological processes and is widely used in functional genomics and translational research.
+
+Tissue expression context was assessed using data from the Genotype-Tissue Expression (GTEx) project. Median gene-level expression values (TPM) across human tissues were obtained from GTEx version 10 (GTEx_Analysis_v10_RNASeQCv2.4.2_gene_median_tpm.gct.gz). These data were used to evaluate brain and central nervous system expression patterns of genes implicated by genetic analyses, consistent with approaches used by tools such as MAGMA and FUMA.
+
+Lithium treatment response genetics were contextualized using published genome-wide association study results from the Consortium on Lithium Genetics (ConLiGen). Genome-wide significant loci identified for a continuous lithium response phenotype (Hou et al., 2016, Table S6) were used as primary anchors, while suggestive loci identified under dichotomous response definitions (Hou et al., 2016, Table S5) were included for comparative and hypothesis-generating analyses. Full lithium response GWAS summary statistics are not publicly redistributed and were therefore not reanalyzed directly.
+
+Bipolar disorder genetic risk was considered in the context of large-scale GWAS results from the Psychiatric Genomics Consortium (PGC), European ancestry analyses. Due to data-sharing considerations and portal availability, raw PGC summary statistics are referenced but not redistributed within this repository.
+
+Linkage disequilibrium (LD) structure was assessed using the 1000 Genomes Project Phase 3 reference panel. LD analyses were demonstrated using chromosome 22 genotype data (ALL.chr22.phase3_shapeit2_mvncall_integrated_v5b.20130502.genotypes.vcf.gz), with broader LD context accessed programmatically using public reference resources rather than locally storing genome-wide genotype data.
+
+## Methods Overview
+
+This analysis follows a gene-centric functional genomics framework. Genetic association signals from bipolar disorder and lithium response GWAS are mapped to genes using genomic coordinates and curated gene annotations. Gene-level results are interpreted in the context of biological pathways and tissue-specific expression, with a focus on central nervous system relevance.
+
+Lithium response loci reported by the ConLiGen consortium are treated as anchor signals for interpretation rather than as inputs to de novo association testing. Bipolar disorder GWAS results provide broader disease-context genetic architecture. No individual-level genotype or phenotype data are analyzed in this project.
+
+```{r setup_environment, message=FALSE, warning=FALSE}
+# -------------------------------
+# Project setup
+# -------------------------------
+
+# Load core packages (install later only if needed)
+library(data.table)
+library(tidyverse)
+
+# Define project directories
+dirs <- c(
+  "data",
+  "data/raw",
+  "data/processed",
+  "data/reference",
+  "results",
+  "results/figures",
+  "results/tables"
+)
+
+# Create directories if they do not exist
+for (d in dirs) {
+  if (!dir.exists(d)) dir.create(d, recursive = TRUE)
+}
+
+# Print confirmation
+cat("Project directories ready:\n")
+print(dirs)
+
+```{r create_lithium_loci, message=FALSE, warning=FALSE}
+# -------------------------------
+# Curated lithium response loci
+# Source: Hou et al., Lancet Psychiatry (2016)
+# -------------------------------
+
+# Table S6: Genome-wide significant loci (continuous phenotype)
+lithium_s6 <- data.table(
+  chr = c(21, 21, 21, 21),
+  position = c(20310893, 20312612, 20326336, 20327427),
+  snp = c("rs79663003", "rs78015114", "rs74795342", "rs75222709"),
+  effect_allele = c("T", "T", "A", "T"),
+  other_allele  = c("C", "C", "G", "G"),
+  gene = c("AL157359.4", "AL157359.4", "AL157359.3", "AL157359.3"),
+  p_value = c(1.60e-08, 1.55e-08, 3.69e-09, 3.85e-09),
+  phenotype = "continuous",
+  source_table = "Hou2016_TableS6"
+)
+
+# Table S5: Suggestive loci (dichotomous phenotype)
+lithium_s5 <- data.table(
+  chr = c(14, 4, 6, 6, 6, 7),
+  position = c(27602830, 182776777, 17161118, 17200766, 17208432, 104417276),
+  snp = c(NA, "rs28625169", "rs9396756", "rs56321723", "rs77865053", "rs12669727"),
+  effect_allele = c("I", "T", "C", "A", "T", "T"),
+  other_allele  = c("R", "C", "G", "G", "C", "C"),
+  gene = c("ENSG00000258081", NA, NA, NA, NA, "LHFPL3"),
+  p_value = c(8.10e-07, 8.76e-07, 2.51e-07, 4.25e-07, 2.98e-07, 3.91e-07),
+  phenotype = "dichotomous",
+  source_table = "Hou2016_TableS5"
+)
+
+# Combine loci
+lithium_loci <- rbindlist(list(lithium_s6, lithium_s5), fill = TRUE)
+
+# Save to disk
+fwrite(lithium_loci, "data/processed/lithium_response_loci.tsv", sep = "\t")
+
+# Quick sanity check
+print(lithium_loci)
+```{r map_loci_to_genes, message=FALSE, warning=FALSE}
+# -------------------------------
+# Map lithium loci to genes
+# -------------------------------
+
+# Load lithium loci
+lithium_loci <- fread("data/processed/lithium_response_loci.tsv")
+
+# Load Ensembl GTF (gene annotations only)
+gtf <- fread(
+  "data/reference/Homo_sapiens.GRCh38.115.gtf.gz",
+  skip = "#",
+  sep = "\t",
+  header = FALSE
+)
+
+# Name GTF columns
+setnames(
+  gtf,
+  c("chr", "source", "feature", "start", "end", "score", "strand", "frame", "attributes")
+)
+
+# Keep only gene entries
+genes <- gtf[feature == "gene"]
+
+# Extract gene_id and gene_name from attributes
+genes[, gene_id := sub('.*gene_id "([^"]+)".*', '\\1', attributes)]
+genes[, gene_name := sub('.*gene_name "([^"]+)".*', '\\1', attributes)]
+
+# Ensure chromosome formatting matches
+genes[, chr := as.integer(gsub("chr", "", chr))]
+genes <- genes[!is.na(chr)]
+
+# Function to find nearest gene
+find_nearest_gene <- function(chr, pos) {
+  g <- genes[chr == !!chr]
+  if (nrow(g) == 0) return(NA)
+  d <- pmin(abs(pos - g$start), abs(pos - g$end))
+  g$gene_name[which.min(d)]
+}
+
+# Apply mapping only where gene is missing
+lithium_loci[is.na(gene),
+             mapped_gene := as.character(mapply(find_nearest_gene, chr, position))]
+
+# Keep original gene when provided
+lithium_loci[!is.na(gene), mapped_gene := gene]
+
+# Save mapped results
+fwrite(
+  lithium_loci,
+  "data/processed/lithium_response_loci_mapped.tsv",
+  sep = "\t"
+)
+
+# Inspect result
+print(lithium_loci)
+```{r gtex_brain_expression, message=FALSE, warning=FALSE}
+
+# -------------------------------
+# GTEx brain expression annotation
+# -------------------------------
+
+# Load mapped lithium loci
+lithium_loci <- fread("data/processed/lithium_response_loci_mapped.tsv")
+
+# Load GTEx median TPM (skip metadata lines)
+gtex <- fread(
+  "data/reference/GTEx_Analysis_v10_RNASeQCv2.4.2_gene_median_tpm.gct.gz",
+  skip = 2
+)
+
+# Rename columns explicitly
+setnames(gtex,
+         old = c("Name", "Description"),
+         new = c("gene_id", "gene_symbol"))
+
+# Identify brain-related tissues
+brain_tissues <- grep("^Brain", colnames(gtex), value = TRUE)
+
+# Subset GTEx to required columns (KEEP gene_symbol)
+gtex_brain <- gtex[, c("gene_symbol", brain_tissues), with = FALSE]
+
+# Compute mean brain expression
+gtex_brain[, mean_brain_tpm := rowMeans(.SD, na.rm = TRUE),
+           .SDcols = brain_tissues]
+
+# Keep compact table
+gtex_brain <- gtex_brain[, .(gene_symbol, mean_brain_tpm)]
+
+# Merge with lithium loci using gene symbols
+lithium_expr <- merge(
+  lithium_loci,
+  gtex_brain,
+  by.x = "mapped_gene",
+  by.y = "gene_symbol",
+  all.x = TRUE
+)
+
+# Save annotated results
+fwrite(
+  lithium_expr,
+  "data/processed/lithium_response_loci_gtex.tsv",
+  sep = "\t"
+)
+
+# Inspect final table
+print(lithium_expr)
+
+```{r brain_expression_plot, fig.width=6, fig.height=4, message=FALSE, warning=FALSE}
+# ----------------------------------------------------
+# Brain expression of lithium response–associated genes
+# Uses GTEx v10 median TPM (brain tissues)
+# ----------------------------------------------------
+
+library(data.table)
+library(ggplot2)
+
+# Load GTEx-annotated lithium loci
+lithium_expr <- fread("data/processed/lithium_response_loci_gtex.tsv")
+
+# Prepare data for plotting
+plot_df <- lithium_expr[
+  !is.na(mapped_gene),
+  .(
+    mean_brain_tpm = max(mean_brain_tpm, na.rm = TRUE),
+    gene_type = ifelse(grepl("^ENSG|^AL", mapped_gene),
+                       "Noncoding / regulatory",
+                       "Protein-coding")
+  ),
+  by = mapped_gene
+]
+
+# Replace -Inf from all-NA cases
+plot_df[!is.finite(mean_brain_tpm), mean_brain_tpm := 0]
+
+# Plot (log scale to reveal structure)
+ggplot(
+  plot_df,
+  aes(
+    x = reorder(mapped_gene, mean_brain_tpm),
+    y = mean_brain_tpm + 1,  # avoid log(0)
+    shape = gene_type
+  )
+) +
+  geom_point(size = 3) +
+  scale_y_log10() +
+  coord_flip() +
+  labs(
+    x = "Gene",
+    y = "Mean GTEx Brain Expression (TPM, log scale)",
+    title = "Brain Expression of Lithium Response–Associated Genes",
+    subtitle = "Protein-coding genes show higher expression than noncoding loci"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+**Figure 1.** Mean brain expression of lithium response–associated genes using GTEx v10 median TPM values. Protein-coding genes (triangles) show higher expression in bulk brain tissue compared with noncoding or regulatory loci (circles).
+
+## Results
+
+Genome-wide association signals associated with lithium treatment response were curated from the ConLiGen consortium and mapped to nearby genes using Ensembl gene annotations. Loci identified using a continuous Alda-derived phenotype generally showed stronger statistical significance than those identified using a dichotomous responder/non-responder definition, consistent with increased power of continuous trait analyses.
+
+Gene-level annotation revealed that lithium-associated loci map to a mixture of protein-coding genes, noncoding transcripts, and intergenic regions. Integration with GTEx v10 median expression data demonstrated that some lithium-associated genes, such as *LHFPL3*, show robust expression across human brain tissues, supporting biological plausibility in central nervous system contexts. In contrast, several loci mapped to noncoding regions or genes with minimal detectable expression in bulk brain tissue, including lncRNA-associated loci on chromosome 21, consistent with regulatory mechanisms rather than direct protein-coding effects.
+
+Together, these results illustrate the heterogeneity of genetic mechanisms underlying lithium response in bipolar disorder and highlight the value of integrating human genetics with tissue-specific transcriptomic context to support biologically informed target prioritization.
+
+## Discussion and Limitations
+
+This project integrates published genome-wide association findings for lithium treatment response in bipolar disorder with gene annotation and tissue-level transcriptomic reference data to provide biological context for genetic associations. The results highlight that lithium-associated loci map to a heterogeneous set of genomic features, including protein-coding genes with robust brain expression and noncoding or intergenic regions with minimal detectable expression in bulk brain tissue. This pattern is consistent with the regulatory architecture commonly observed in psychiatric pharmacogenomics and underscores the importance of integrating genetic association signals with biological context rather than interpreting loci in isolation.
+
+Several limitations should be noted. First, the analysis is based on curated summary-level GWAS results rather than individual-level genotype and phenotype data. As a result, fine-mapping, conditional analyses, polygenic modeling, and patient-level prediction were not possible within the scope of this project. Access to individual-level data would enable more detailed investigation of genetic architecture, including ancestry-specific effects, gene–gene interactions, and integration with longitudinal clinical outcomes. Second, SNP-to-gene mapping was based on reported annotations and genomic proximity and does not capture long-range regulatory interactions such as chromatin looping or enhancer–promoter contacts.
+
+Third, GTEx expression values represent median expression across bulk brain tissues and do not reflect cell-type–specific expression patterns or disease-state–dependent transcriptional changes that may be relevant to lithium response. Genes with low or absent bulk tissue expression may still play important regulatory roles in specific neuronal or glial populations. Finally, the presence of brain expression supports biological plausibility but does not establish causality or identify direct molecular mechanisms of lithium action.
+
+Despite these limitations, this analysis demonstrates a reproducible framework for contextualizing psychiatric pharmacogenomic findings using publicly available human reference data. The approach mirrors workflows commonly used in academic and pharmaceutical research and provides a foundation for deeper investigation when individual-level genetic, transcriptomic, and clinical data are available.
