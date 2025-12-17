@@ -1,0 +1,27 @@
+# R session files
+.Rhistory
+.RData
+.Ruserdata
+
+# RStudio files
+.Rproj.user/
+*.Rproj
+
+# Temporary files
+*.log
+*.tmp
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Large raw data (keep processed summaries only)
+data/raw/
+
+# Renv / packrat (if used later)
+renv/
+packrat/
+
+# Knitted outputs (optional)
+*.html
+*.pdf
